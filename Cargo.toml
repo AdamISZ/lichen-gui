@@ -1,0 +1,49 @@
+[package]
+name = "lichen-gui"
+description = "A local GUI for a lichen wallet: a page in your browser, served on 127.0.0.1"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[[bin]]
+name = "lichen-gui"
+path = "src/main.rs"
+
+# A local stack for developing the GUI: regtest bitcoind, the sequencer,
+# a hub and a miner in one process, and a faucet to pay deposits.
+[[bin]]
+name = "lichen-devstack"
+path = "src/bin/devstack.rs"
+
+[dependencies]
+anyhow = "1"
+bitcoin = { version = "0.32", features = ["serde"] }
+bitcoincore-rpc = "0.19"
+clap = { version = "4", features = ["derive"] }
+getrandom = "0.2"
+hex = "0.4"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+signal-hook = "0.3"
+tiny_http = "0.12"
+ureq = { version = "2", features = ["json"] }
+# lichen, beside this checkout (and ln-gap beside it, as lichen needs)
+lichen-chain = { path = "../lichen/crates/chain" }
+lichen-hub = { path = "../lichen/crates/hub" }
+lichen-l2 = { path = "../lichen/crates/l2" }
+lichen-ledger = { path = "../lichen/crates/ledger" }
+lichen-proto = { path = "../lichen/crates/proto" }
+lichen-sequencer = { path = "../lichen/crates/sequencer" }
+lichen-wallet = { path = "../lichen/crates/wallet" }
+lngap-btc = { path = "../ln-gap/crates/btc" }
+
+# lichen's, repeated: profiles and patches apply only from the top-level
+# workspace
+[profile.dev.package."*"]
+opt-level = 2
+
+[patch."https://github.com/FairgateLabs/BitVMX-CPU"]
+emulator = { git = "https://github.com/AdamISZ/BitVMX-CPU", rev = "0b7d285fc5c7795d16fd58d380ff6ef25f2f0423" }
+bitvmx-cpu-definitions = { git = "https://github.com/AdamISZ/BitVMX-CPU", rev = "0b7d285fc5c7795d16fd58d380ff6ef25f2f0423" }
+bitcoin-script-riscv = { git = "https://github.com/AdamISZ/BitVMX-CPU", rev = "0b7d285fc5c7795d16fd58d380ff6ef25f2f0423" }

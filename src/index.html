@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lichen wallet</title>
+<style>
+:root {
+  --bg: #f6f7f4; --card: #ffffff; --ink: #1d2320; --muted: #66706a; --line: #dfe3dc;
+  --accent: #2f6f4f; --accent-ink: #ffffff; --warn: #9a5b00; --warn-bg: #fff4e0; --bad: #a3261b; --bad-bg: #fdecea;
+  --good: #2f6f4f; --good-bg: #e7f3ec; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141816; --card: #1c211e; --ink: #e4e8e3; --muted: #97a29b; --line: #2e3531;
+    --accent: #5fb38a; --accent-ink: #0d120f; --warn: #f0b45a; --warn-bg: #33270f; --bad: #f28b80; --bad-bg: #3a1c19;
+    --good: #7fd0a8; --good-bg: #17301f;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--card); flex-wrap: wrap; }
+header h1 { font-size: 18px; margin: 0; letter-spacing: .02em; }
+.pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.pill.ok { color: var(--good); background: var(--good-bg); border-color: transparent; }
+.pill.bad { color: var(--bad); background: var(--bad-bg); border-color: transparent; }
+.spacer { flex: 1; }
+.headbal { font-variant-numeric: tabular-nums; font-weight: 600; }
+nav { display: flex; gap: 4px; padding: 0 20px; background: var(--card); border-bottom: 1px solid var(--line); }
+nav button { background: none; border: none; border-bottom: 2px solid transparent; padding: 10px 14px; font: inherit; color: var(--muted); cursor: pointer; }
+nav button.on { color: var(--ink); border-bottom-color: var(--accent); }
+main { max-width: 980px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; }
+#tab-setup, #tab-pay { display: grid; gap: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+.card h2 { font-size: 15px; margin: 0 0 12px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+input, select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--ink); font: inherit; }
+input.mono { font-family: var(--mono); font-size: 13px; }
+button.act { margin-top: 12px; padding: 8px 16px; border-radius: 7px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 600; cursor: pointer; }
+button.act.sec { background: transparent; color: var(--accent); }
+button.act:disabled { opacity: .45; cursor: default; }
+button.small { margin: 0; padding: 4px 10px; font-size: 13px; font-weight: 500; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 12px; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; font-size: 14px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-size: 13px; word-break: break-all; }
+.note { font-size: 13px; color: var(--muted); }
+.msg { padding: 10px 12px; border-radius: 7px; font-size: 14px; white-space: pre-wrap; }
+.msg.bad { background: var(--bad-bg); color: var(--bad); }
+.msg.warn { background: var(--warn-bg); color: var(--warn); }
+.msg.good { background: var(--good-bg); color: var(--good); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; color: var(--muted); font-weight: 500; font-size: 13px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
+td.num, th.num { text-align: right; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row input { width: auto; flex: 1; min-width: 100px; }
+.pay { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.pay img { width: 180px; height: 180px; background: #fff; border-radius: 6px; }
+.big { font-size: 34px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.log { font-family: var(--mono); font-size: 12px; color: var(--muted); max-height: 160px; overflow: auto; white-space: pre-wrap; margin-top: 8px; }
+.spin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%; animation: s 1s linear infinite; margin-right: 6px; }
+@keyframes s { to { transform: rotate(360deg); } }
+.hidden { display: none !important; }
+.copy { word-break: break-all; }
+button.copybtn { margin: 4px 0 0 8px; vertical-align: baseline; }
+</style>
+</head>
+<body>
+<header>
+  <h1>lichen</h1>
+  <span id="net" class="pill">not connected</span>
+  <span id="conn" class="pill">—</span>
+  <span id="height" class="note"></span>
+  <span class="spacer"></span>
+  <span class="note">balance</span> <span id="headbal" class="headbal">—</span>
+</header>
+<nav>
+  <button data-tab="setup" class="on">Hub &amp; contracts</button>
+  <button data-tab="pay">Payments</button>
+</nav>
+<main>
+  <div id="notoken" class="msg bad hidden">This page needs the URL lichen-gui printed when it started (it carries this launch's token).</div>
+
+  <!-- the running operation, on both tabs -->
+  <section id="job" class="card hidden">
+    <h2 id="jobname"></h2>
+    <div id="jobpay" class="hidden">
+      <p>Pay exactly this amount to this address, from any wallet or faucet. The opening goes on by itself once it confirms; you can close this window meanwhile.</p>
+      <div class="pay">
+        <img id="payqr" alt="QR code of the deposit address">
+        <dl class="kv">
+          <dt>amount</dt><dd><span id="payamt" class="copy"></span></dd>
+          <dt>address</dt><dd><span id="payaddr" class="mono copy"></span></dd>
+        </dl>
+      </div>
+      <button id="faucetbtn" class="act sec hidden">Pay it from the devstack's faucet</button>
+    </div>
+    <div id="jobresult" class="msg hidden"></div>
+    <div id="joblog" class="log"></div>
+  </section>
+
+  <div id="tab-setup">
+    <div class="grid2">
+      <section class="card">
+        <h2>Hub connection</h2>
+        <label for="c-network">network</label>
+        <select id="c-network">
+          <option value="mutinynet">Mutinynet</option>
+          <option value="signet">signet</option>
+          <option value="testnet4">testnet4</option>
+          <option value="regtest">regtest</option>
+        </select>
+        <label for="c-hub">hub URL</label>
+        <input id="c-hub" class="mono" placeholder="http://host:18310">
+        <label for="c-sequencer">sequencer URL</label>
+        <input id="c-sequencer" class="mono" placeholder="http://host:18300">
+        <details>
+          <summary>chain source</summary>
+          <label for="c-esplora">Esplora servers, comma-separated (empty: the network's public one)</label>
+          <input id="c-esplora" class="mono">
+          <label for="c-rpc">or a node's RPC URL (a local regtest)</label>
+          <input id="c-rpc" class="mono">
+          <label for="c-cookie">its cookie file</label>
+          <input id="c-cookie" class="mono">
+          <label for="c-faucet">devstack faucet URL</label>
+          <input id="c-faucet" class="mono">
+        </details>
+        <button id="connect" class="act">Connect</button>
+        <div id="connmsg" class="msg hidden" style="margin-top:12px"></div>
+      </section>
+
+      <section class="card">
+        <h2>The hub's terms</h2>
+        <div id="terms" class="note">Connect to see them.</div>
+      </section>
+    </div>
+
+    <section id="pin" class="card hidden">
+      <h2>A new deployment: check its keys</h2>
+      <p>This is the first time this wallet sees this hub. Check these keys against the ones the hub's operator publishes before you use it: a wallet is made for this deployment, and pinned to it.</p>
+      <dl class="kv">
+        <dt>sequencer key</dt><dd id="pin-seq" class="mono"></dd>
+        <dt>hub key</dt><dd id="pin-hub" class="mono"></dd>
+        <dt>anchored on Bitcoin</dt><dd id="pin-anch"></dd>
+        <dt>wallet file</dt><dd id="pin-file" class="mono"></dd>
+      </dl>
+      <button id="pinbtn" class="act">The keys match: make my wallet</button>
+    </section>
+
+    <section id="opencard" class="card hidden">
+      <h2>Open a contract</h2>
+      <div class="grid2">
+        <div>
+          <label for="o-deposit">deposit (sats): what you put in, minted to you on the L2 less the fee</label>
+          <input id="o-deposit" type="number" min="0" step="1000" value="100000">
+          <label for="o-liq">inbound liquidity (sats): what you can receive beyond your balance</label>
+          <input id="o-liq" type="number" min="0" step="1000" value="200000">
+          <label for="o-payout">your payout and refund address (on Bitcoin)</label>
+          <input id="o-payout" class="mono" placeholder="tb1…" autocomplete="off" spellcheck="false">
+          <div class="note" id="o-payout-note">An address of your own Bitcoin wallet (Sparrow, Bitcoin Core, …): this GUI holds no coins on Bitcoin.</div>
+          <button id="o-payout-new" class="act sec hidden">A new address from the devstack's node</button>
+          <details>
+            <summary>advanced</summary>
+            <label for="o-reserve">your reserve (sats): returned to you unless you lose a dispute</label>
+            <input id="o-reserve" type="number" min="0" step="1000" value="20000">
+          </details>
+        </div>
+        <div>
+          <div id="quote" class="note">—</div>
+        </div>
+      </div>
+      <button id="openbtn" class="act">Open the contract</button>
+    </section>
+
+    <section id="contractscard" class="card hidden">
+      <h2>Contracts</h2>
+      <div id="contracts"></div>
+    </section>
+
+    <section id="depositscard" class="card hidden">
+      <h2>Deposits not yet open</h2>
+      <div id="deposits"></div>
+    </section>
+  </div>
+
+  <div id="tab-pay" class="hidden">
+    <div class="grid2">
+      <section class="card">
+        <h2>Balance</h2>
+        <div id="bal" class="big">—</div>
+        <div id="balsplit" class="note"></div>
+        <dl class="kv" style="margin-top:12px">
+          <dt>backed</dt><dd id="backed">—</dd>
+          <dt>can receive, backed</dt><dd id="inbound">—</dd>
+        </dl>
+        <div id="unbacked" class="msg warn hidden" style="margin-top:12px"></div>
+        <p class="note">You can receive any amount. Up to your open contracts' caps it is backed: you can withdraw it to Bitcoin whatever the hub does. Beyond them it is credit on the hub, not backed by a contract of yours.</p>
+      </section>
+      <section class="card">
+        <h2>Receive</h2>
+        <p class="note">Your L2 address on this hub's deployment. Payments to it arrive within seconds. It's this wallet's: on another deployment (a restarted devstack, too) you have another wallet and address, so payers must use this one.</p>
+        <div class="pay">
+          <img id="addrqr" alt="QR code of your L2 address">
+          <div><span id="addr" class="mono copy"></span></div>
+        </div>
+      </section>
+    </div>
+    <section class="card">
+      <h2>Send</h2>
+      <label for="s-to">to (an L2 address, 64 hex characters): paste the receiver's current one</label>
+      <input id="s-to" class="mono" autocomplete="off" spellcheck="false">
+      <label for="s-amt">amount (sats)</label>
+      <input id="s-amt" type="number" min="1" step="1" autocomplete="off">
+      <button id="sendbtn" class="act">Send</button>
+    </section>
+    <div class="grid2">
+      <section class="card">
+        <h2>Your notes</h2>
+        <div id="notes" class="note">—</div>
+      </section>
+      <section class="card">
+        <h2>Activity</h2>
+        <div id="history" class="note">—</div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+const token = new URLSearchParams(location.search).get('t');
+const $ = id => document.getElementById(id);
+const sats = n => (n ?? 0).toLocaleString('en-US');
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const BLOCK_SECS = { mutinynet: 30, signet: 600, testnet4: 600, regtest: 0 };
+let S = null, filled = false;
+
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: { 'X-Lichen-Token': token, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const v = await r.json();
+  if (!r.ok) throw new Error(v.error || r.statusText);
+  return v;
+}
+function show(el, on) { (typeof el === 'string' ? $(el) : el).classList.toggle('hidden', !on); }
+function msg(el, text, kind) { el = $(el); el.className = 'msg ' + (kind || ''); el.textContent = text; show(el, !!text); }
+// a Copy button after `el`, made once, copying the latest `text`
+function copyable(el, text, label = 'Copy') {
+  el.dataset.copy = text;
+  let b = el.nextElementSibling;
+  if (!b || !b.classList.contains('copybtn')) {
+    b = document.createElement('button');
+    b.className = 'act small sec copybtn'; b.textContent = label;
+    b.onclick = async () => {
+      const t = el.dataset.copy;
+      try { await navigator.clipboard.writeText(t); }
+      catch { const a = document.createElement('textarea'); a.value = t; document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); }
+      b.textContent = 'Copied'; setTimeout(() => b.textContent = label, 1500);
+    };
+    el.after(b);
+  }
+}
+function qr(img, data) { const src = '/api/qr?d=' + encodeURIComponent(data); if (img.dataset.d !== data) { img.dataset.d = data; fetch(src, { headers: { 'X-Lichen-Token': token } }).then(r => r.text()).then(svg => img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)); } }
+function setHTML(id, html) {
+  const el = $(id);
+  if (el.dataset.html === html) return false;
+  const vals = {}, focus = document.activeElement?.id;
+  el.querySelectorAll('input[data-typed]').forEach(i => vals[i.id] = i.value);
+  el.innerHTML = html; el.dataset.html = html;
+  el.querySelectorAll('input').forEach(i => { if (vals[i.id] !== undefined) { i.value = vals[i.id]; i.dataset.typed = 1; } });
+  if (focus && el.querySelector('#' + focus)) $(focus).focus();
+  return true;
+}
+document.addEventListener('input', e => { if (e.target.tagName === 'INPUT') e.target.dataset.typed = 1; });
+// what of the balance no contract backs
+function unbackedNow() {
+  if (!S?.wallet) return 0;
+  const snap = S.snap, bal = snap.transparent + snap.shielded;
+  return Math.max(0, bal - backing(snap).reduce((a, c) => a + c.cap, 0));
+}
+// the open contracts that back the balance: not closed, not ended, no
+// return made yet
+function backing(snap) { return snap.contracts.filter(c => !c.closed && c.returned == null && (snap.height == null || snap.height < c.t_close)); }
+function about(blocks, net) {
+  const s = BLOCK_SECS[net];
+  if (!s || blocks == null) return '';
+  const secs = blocks * s;
+  if (secs < 3600) return `about ${Math.round(secs / 60)} min`;
+  if (secs < 172800) return `about ${(secs / 3600).toFixed(1)} h`;
+  return `about ${(secs / 86400).toFixed(1)} days`;
+}
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+  show('tab-setup', b.dataset.tab === 'setup');
+  show('tab-pay', b.dataset.tab === 'pay');
+});
+
+$('connect').onclick = async () => {
+  const conn = { network: $('c-network').value, hub: $('c-hub').value.trim(), sequencer: $('c-sequencer').value.trim(), esplora: $('c-esplora').value.trim(), rpc_url: $('c-rpc').value.trim(), cookie: $('c-cookie').value.trim(), faucet: $('c-faucet').value.trim() };
+  msg('connmsg', 'connecting …');
+  try {
+    const r = await api('POST', '/api/connect', conn);
+    msg('connmsg', r.pin ? 'Connected: check the deployment\'s keys below.' : 'Connected.', 'good');
+  } catch (e) { msg('connmsg', e.message, 'bad'); }
+  refresh();
+};
+$('pinbtn').onclick = async () => {
+  try { await api('POST', '/api/pin'); msg('connmsg', 'Your wallet for this deployment is made.', 'good'); }
+  catch (e) { msg('connmsg', e.message, 'bad'); }
+  refresh();
+};
+
+let quoteTimer = null;
+function ask() { return { deposit: +$('o-deposit').value || 0, liquidity: +$('o-liq').value || 0, reserve: +$('o-reserve').value || 0 }; }
+async function quote() {
+  const a = ask();
+  try {
+    const q = await api('GET', `/api/quote?deposit=${a.deposit}&liquidity=${a.liquidity}&reserve=${a.reserve}`);
+    const owed = unbackedNow();
+    $('quote').innerHTML = `<dl class="kv">
+      <dt>liquidity fee</dt><dd>${sats(q.fee)} sats</dd>
+      <dt>minted to you</dt><dd><b>${sats(q.minted)}</b> sats</dd>
+      <dt>cap</dt><dd>${sats(q.cap)} sats</dd>
+      ${owed ? `<dt>backs</dt><dd>${sats(Math.min(owed, q.inbound))} sats of your unbacked balance${owed > q.inbound ? `, leaving ${sats(owed - q.inbound)} unbacked` : ''}</dd>` : ''}
+      <dt>can receive</dt><dd>${sats(Math.max(0, q.inbound - owed))} sats ${owed ? 'more, backed' : 'beyond your balance'}</dd>
+      <dt>dispute unit</dt><dd>${sats(q.unit)} sats</dd>
+      <dt>you pay in</dt><dd><b>${sats(q.pay)}</b> sats</dd></dl>
+      <p class="note">You pay in your deposit, your reserve of ${sats(q.reserve)} sats, and ${sats(q.extra)} sats for the funding fee and a fee budget for a dispute; the reserve and what the budget doesn't spend come back to your payout address when the contract ends.</p>`;
+    $('openbtn').disabled = false;
+  } catch (e) { $('quote').innerHTML = `<div class="msg bad">${esc(e.message)}</div>`; $('openbtn').disabled = true; }
+}
+['o-deposit', 'o-liq', 'o-reserve'].forEach(id => $(id).oninput = () => { clearTimeout(quoteTimer); quoteTimer = setTimeout(quote, 250); });
+$('openbtn').onclick = async () => {
+  await act('/api/open', { ...ask(), payout: $('o-payout').value.trim() }, $('openbtn'));
+};
+$('sendbtn').onclick = async () => {
+  if (await act('/api/send', { to: $('s-to').value.trim(), amount: +$('s-amt').value }, $('sendbtn'))) $('s-amt').value = '';
+};
+$('faucetbtn').onclick = async () => {
+  const p = S?.job?.pay; if (!p) return;
+  try { await api('POST', '/api/faucet', { address: p.address, sats: p.sats }); } catch (e) { alertMsg(e); }
+};
+$('o-payout-new').onclick = async () => {
+  try { $('o-payout').value = (await api('POST', '/api/faucet-address', {})).address; } catch (e) { alertMsg(e); }
+};
+// a node, its cookie, a faucet and an Esplora are one network's
+$('c-network').onchange = () => ['c-esplora', 'c-rpc', 'c-cookie', 'c-faucet'].forEach(id => $(id).value = '');
+// the operation's card is at the top: bring it into view when one starts
+// or is refused, wherever the button was
+function showJob() { requestAnimationFrame(() => $('job').scrollIntoView({ behavior: 'smooth', block: 'start' })); }
+function alertMsg(e) { show('job', true); $('jobname').textContent = 'not started'; msg('jobresult', e.message, 'bad'); $('joblog').textContent = ''; show('jobpay', false); showJob(); }
+// an operation from a button, the button held while it's asked (and
+// left as it was found); whether it started
+async function act(path, body, btn) {
+  const was = btn?.disabled;
+  if (btn) btn.disabled = true;
+  let ok = false;
+  try { await api('POST', path, body); ok = true; show('job', true); showJob(); } catch (e) { alertMsg(e); }
+  finally { if (btn) btn.disabled = was; }
+  refresh();
+  return ok;
+}
+
+function render() {
+  const s = S, snap = s.snap, conn = s.saved.conn, info = snap.info, net = conn.network;
+  if (!filled) {
+    filled = true;
+    $('c-network').value = net; $('c-hub').value = conn.hub; $('c-sequencer').value = conn.sequencer; $('c-esplora').value = conn.esplora;
+    $('c-rpc').value = conn.rpc_url; $('c-cookie').value = conn.cookie; $('c-faucet').value = conn.faucet; $('o-payout').value = s.saved.payout;
+    if (s.wallet) quote();
+  }
+  // the devstack's faucet: regtest only, whatever a saved connection holds
+  const faucet = !!conn.faucet && net === 'regtest';
+  show('o-payout-new', faucet); show('o-payout-note', !faucet);
+  // header
+  $('net').textContent = conn.hub ? net : 'not connected';
+  const up = s.wallet && !snap.hub_error;
+  $('conn').textContent = !conn.hub ? '—' : snap.hub_error ? 'hub unreachable' : s.wallet ? 'connected' : s.pin ? 'keys to check' : 'not connected';
+  $('conn').className = 'pill ' + (up ? 'ok' : conn.hub ? 'bad' : '');
+  $('height').textContent = snap.height != null ? `block ${sats(snap.height)}` : '';
+  const bal = snap.transparent + snap.shielded;
+  $('headbal').textContent = s.wallet ? `${sats(bal)} sats` : '—';
+  // terms
+  if (info) {
+    const days = about(info.duration, net);
+    $('terms').innerHTML = `<dl class="kv">
+      <dt>liquidity fee</dt><dd>${(info.fee_ppm / 10000).toFixed(2)}% of the liquidity you ask</dd>
+      <dt>most liquidity</dt><dd>${sats(info.max_liquidity)} sats a contract</dd>
+      <dt>contract length</dt><dd>${sats(info.duration)} blocks${days ? ' (' + days + ')' : ''}</dd>
+      <dt>hub's reserve</dt><dd>${(info.reserve_ppm / 10000).toFixed(2)}% of the cap</dd>
+      <dt>disputes</dt><dd>${esc(info.statement)}</dd>
+      <dt>lichen</dt><dd>${esc(info.version || 'older than 0.4.0')}${info.commit ? ` <span class="note mono">${esc(info.commit)}</span>` : ''}</dd></dl>`
+      + (snap.hub_error ? `<div class="msg bad" style="margin-top:10px">${esc(snap.hub_error)}</div>` : '');
+  } else if (snap.hub_error) { $('terms').innerHTML = `<div class="msg bad">${esc(snap.hub_error)}</div>`; }
+  // pin
+  show('pin', !!s.pin);
+  if (s.pin) { $('pin-seq').textContent = s.pin.sequencer; $('pin-hub').textContent = s.pin.hub; $('pin-anch').textContent = s.pin.anchored ? 'yes' : 'no'; $('pin-file').textContent = s.pin.wallet_file; }
+  show('opencard', !!s.wallet);
+  // job
+  const j = s.job;
+  show('job', !!j.name);
+  if (j.name) {
+    $('jobname').innerHTML = (j.running ? '<span class="spin"></span>' : '') + esc(j.name);
+    show('jobpay', j.running && !!j.pay);
+    if (j.pay) {
+      $('payamt').textContent = `${sats(j.pay.sats)} sats (${(j.pay.sats / 1e8).toFixed(8)} BTC)`; copyable($('payamt'), (j.pay.sats / 1e8).toFixed(8));
+      $('payaddr').textContent = j.pay.address; copyable($('payaddr'), j.pay.address);
+      qr($('payqr'), 'bitcoin:' + j.pay.address + '?amount=' + (j.pay.sats / 1e8).toFixed(8));
+      show('faucetbtn', !!conn.faucet && net === 'regtest');
+    }
+    if (j.error) msg('jobresult', j.error, 'bad'); else if (j.result) msg('jobresult', j.result, 'good'); else msg('jobresult', '');
+    $('joblog').textContent = j.log.slice(-12).join('\n');
+  }
+  // contracts
+  show('contractscard', snap.contracts.length > 0);
+  setHTML('contracts', snap.contracts.length ? `<table><tr><th>contract</th><th class="num">minted</th><th class="num">cap</th><th>ends</th><th>state</th><th></th></tr>` + snap.contracts.map(c => {
+    const left = snap.height != null ? c.t_close - snap.height : null;
+    const ends = `block ${sats(c.t_close)}` + (left != null ? (left > 0 ? `<div class="note">${sats(left)} blocks ${about(left, net) ? '· ' + about(left, net) : ''}</div>` : '<div class="note" style="color:var(--bad)">ended</div>') : '');
+    const state = c.closed ? `${c.disputing != null ? 'closed by a dispute' : 'closed'} <div class="note mono">${esc(c.closed.slice(0, 16))}…</div>` : c.disputing != null ? 'in dispute' : c.returned != null ? `${sats(c.returned)} sats returned, not folded` : !c.mint_claimed ? 'mint not claimed' : 'open';
+    let acts = '';
+    if (!c.closed) {
+      // the whole balance by default, up to the cap; a return made already
+      // is the amount to fold
+      const all = c.returned ?? Math.min(bal, c.cap);
+      const what = c.returned != null ? 'the return made' : bal > c.cap ? `the cap; your balance is ${sats(bal)}` : 'your whole balance';
+      acts += `<div class="row"><input id="w-${c.cid}" type="number" min="1" placeholder="sats" autocomplete="off" value="${all || ''}"${c.returned != null ? ' readonly' : ''}><button class="act small" data-w="${c.cid}">Withdraw</button></div><div class="note">${all ? sats(all) + ' sats: ' + what : 'nothing to withdraw'}</div>`;
+    }
+    if (!c.mint_claimed) acts += `<button class="act small sec" data-m="${c.cid}">Claim mint</button>`;
+    if (c.closed && c.disputing == null) acts += `<button class="act small sec" data-f="${c.cid}">Sweep fee budget</button>`;
+    return `<tr><td>${c.cid}<div class="note">payout ${esc(c.payout.slice(0, 14))}…</div></td><td class="num">${sats(c.minted)}</td><td class="num">${sats(c.cap)}</td><td>${ends}</td><td>${state}</td><td>${acts}</td></tr>`;
+  }).join('') + '</table><p class="note">Withdraw before a contract ends: an unwithdrawn contract is the hub\'s at its end. A withdrawal waits for its return to be anchored on Bitcoin.</p>' : '');
+  document.querySelectorAll('[data-w]').forEach(b => b.onclick = () => act('/api/withdraw', { cid: +b.dataset.w, amount: +$('w-' + b.dataset.w).value }, b));
+  document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => act('/api/claim-mint', { cid: +b.dataset.m }, b));
+  document.querySelectorAll('[data-f]').forEach(b => b.onclick = () => act('/api/sweep', { cid: +b.dataset.f }, b));
+  // deposits
+  const deps = snap.deposits.filter(d => !(j.running && j.pay && j.pay.address === d.address));
+  show('depositscard', deps.length > 0);
+  setHTML('deposits', deps.map(d => `<div style="margin-bottom:12px"><div><b>contract ${d.cid}</b> ${d.offered ? '· offer accepted' : ''}</div>
+    <div class="mono">${esc(d.address)}</div>
+    <div class="note">refunds to ${esc(d.payout)}, ${sats(d.timeout)} blocks after it confirms</div>
+    <div class="row" style="margin-top:6px">${d.ask ? `<button class="act small" data-r="${d.cid}">Resume the opening</button>` : '<span class="note">(opened elsewhere: resume it with the CLI)</span>'}
+    <button class="act small sec" data-x="${d.cid}">Refund</button></div></div>`).join(''));
+  document.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { const d = snap.deposits.find(x => x.cid === +b.dataset.r); act('/api/resume', { cid: d.cid, ask: d.ask }, b); });
+  document.querySelectorAll('[data-x]').forEach(b => b.onclick = () => act('/api/refund', { cid: +b.dataset.x }, b));
+  // payments
+  $('bal').textContent = s.wallet ? `${sats(bal)} sats` : '—';
+  $('balsplit').textContent = snap.shielded ? `transparent ${sats(snap.transparent)}, shielded ${sats(snap.shielded)}` : '';
+  // backing: the caps of the contracts still to withdraw from (each
+  // withdraws once, up to its cap, before it ends)
+  const caps = backing(snap).reduce((a, c) => a + c.cap, 0);
+  const unbacked = unbackedNow();
+  $('backed').textContent = !s.wallet ? '—' : `${sats(bal - unbacked)} sats` + (caps ? ` (your open contracts' caps: ${sats(caps)})` : '');
+  $('inbound').textContent = !s.wallet ? '—' : caps ? `${sats(Math.max(0, caps - bal))} sats; more arrives unbacked` : 'nothing: with no open contract, all you receive is unbacked';
+  show('unbacked', !!s.wallet && unbacked > 0);
+  if (s.wallet && unbacked > 0) {
+    const liq = Math.ceil(unbacked / 1000) * 1000;
+    setHTML('unbacked', `<b>${sats(unbacked)} sats of your balance are unbacked.</b> They are credit on the hub: no contract of yours covers them, so you can't withdraw them to Bitcoin on your own: you rely on the hub to honour them. To back them, open a contract with at least ${sats(unbacked)} sats of inbound liquidity, or pay them on.
+      <div><button class="act small" id="backbtn">Open a contract with ${sats(liq)} sats of liquidity</button></div>`);
+    $('backbtn').onclick = () => { $('o-liq').value = liq; document.querySelector('[data-tab=setup]').click(); quote(); $('o-liq').scrollIntoView({ block: 'center' }); };
+  }
+  if (snap.address) { $('addr').textContent = snap.address; copyable($('addr'), snap.address, 'Copy address'); qr($('addrqr'), snap.address); }
+  const notes = [...snap.notes].sort((a, b) => b.index - a.index);
+  setHTML('notes', notes.length ? `<table><tr><th>note</th><th class="num">sats</th><th>memo</th><th></th></tr>` + notes.slice(0, 40).map(n => `<tr><td>#${n.index}</td><td class="num">${sats(n.value)}</td><td>${n.memo || ''}</td><td>${n.spent ? '<span class="note">spent</span>' : 'yours'}</td></tr>`).join('') + '</table>' : 'none yet');
+  setHTML('history', s.history.length ? s.history.slice(0, 25).map(h => `<div style="margin-bottom:8px"><div>${esc(h.name)} <span class="note">${new Date(h.ended * 1000).toLocaleString()}</span></div><div class="${h.error ? '' : 'note'}" style="${h.error ? 'color:var(--bad)' : ''}">${esc((h.error || h.result || '').split('\n')[0])}</div></div>`).join('') : 'nothing yet');
+  if (snap.wallet_error) msg('connmsg', snap.wallet_error, 'bad');
+}
+
+async function refresh() {
+  if (!token) { show('notoken', true); return; }
+  try { S = await api('GET', '/api/state'); render(); } catch (e) { $('conn').textContent = 'lichen-gui stopped?'; $('conn').className = 'pill bad'; }
+}
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
