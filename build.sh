@@ -57,4 +57,4 @@ checkout "$lngap" https://github.com/AdamISZ/ln-gap.git "$lngap_rev" "ln-gap"
 cd "$here"
 # the lock names lichen's version: --locked holds it to LICHEN_TAG's
 if [ "${LICHEN_GUI_DEV:-}" = 1 ]; then cargo build --release; else cargo build --release --locked; fi
-echo "built: $here/target/release/lichen-gui (and lichen-devstack)"
+echo "built: ${CARGO_TARGET_DIR:-$here/target}/release/lichen-gui (and lichen-devstack)"

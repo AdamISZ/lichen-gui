@@ -201,11 +201,12 @@ fn route(app: &Arc<App>, method: &Method, path: &str, query: &str, body: &str) -
                 amount: u64,
             }
             let w: W = serde_json::from_value(body)?;
-            ensure!(w.amount > 0, "nothing to withdraw");
-            app.spawn(&format!("withdraw {} sats from contract {}", w.amount, w.cid), move |_, wallet, conn, dir| {
+            let name = if w.amount == 0 { format!("close contract {}, nothing withdrawn", w.cid) } else { format!("withdraw {} sats from contract {}", w.amount, w.cid) };
+            app.spawn(&name, move |_, wallet, conn, dir| {
                 let info = lichen_wallet::hub_info(&conn.hub)?;
                 let statement = app::statement(&info)?;
                 match wallet.withdraw(&conn.hub, &statement, dir, w.cid, w.amount) {
+                    Ok(txid) if w.amount == 0 => Ok(format!("closed: the fold is {txid}, your reserve paid to the contract's payout address")),
                     Ok(txid) => Ok(format!("withdrew {} sats: the fold is {txid}, paid to the contract's payout address", w.amount)),
                     Err(e) if wallet.returned(w.cid).is_some() => bail!(
                         "{e:#}\n\nYour {} sats are returned to the hub on the L2 and not folded. If the hub was only unreachable, withdraw again (the same return is used). If it refuses, only a dispute on Bitcoin gets them back, before the contract's end. For now, with lichen's CLI, while this GUI is stopped (both use the wallet file):\n\n  {} dispute {} {}\n\nIt tells you what comes next (lichen's docs/USE_A_WALLET.md, \"If the hub won't pay\").",
@@ -230,10 +231,42 @@ fn route(app: &Arc<App>, method: &Method, path: &str, query: &str, body: &str) -
         (Method::Post, "/api/sweep") => {
             let c: Cid = serde_json::from_value(body)?;
             app.spawn(&format!("sweep contract {}'s fee budget", c.cid), move |_, w, conn, _| {
-                let txid = w.sweep_fees(&conn.chain()?, c.cid, bitcoin::Amount::from_sat(500), false)?;
+                let chain = conn.chain()?;
+                // closed by the hub's default, which the wallet didn't post:
+                // its output spent, nothing left for the budget to pay
+                let funding = w.contracts.iter().find(|h| h.record.cid() == c.cid).map(|h| h.record.funding).context("no such contract")?;
+                let spent = !chain.unspent(&funding)?;
+                let txid = w.sweep_fees(&chain, c.cid, bitcoin::Amount::from_sat(500), spent)?;
                 Ok(format!("swept to the payout address: {txid}"))
             })?;
             j(json!({ "ok": true }))
+        }
+        (Method::Post, "/api/post-default") => {
+            let c: Cid = serde_json::from_value(body)?;
+            app.spawn(&format!("post contract {}'s default", c.cid), move |_, w, conn, dir| {
+                let info = lichen_wallet::hub_info(&conn.hub)?;
+                let txid = w.post_default(&conn.chain()?, &app::statement(&info)?, dir, c.cid)?;
+                Ok(format!("posted the default: {txid}, your reserve paid to the contract's payout address"))
+            })?;
+            j(json!({ "ok": true }))
+        }
+        // paying from the payout key needs no wallet, so it runs beside an
+        // operation (an opening waiting for this very payment)
+        (Method::Post, "/api/send-payout") => {
+            #[derive(Deserialize)]
+            struct S {
+                to: String,
+                amount: Option<u64>,
+            }
+            let p: S = serde_json::from_value(body)?;
+            let txid = app.send_payout(&p.to, p.amount)?;
+            j(json!({ "txid": txid.to_string() }))
+        }
+        (Method::Post, "/api/pay-deposit") => {
+            let pay = app.job.lock().unwrap().pay.clone().context("no deposit to pay: the opening isn't waiting for one")?;
+            let txid = app.send_payout(&pay.address, Some(pay.sats))?;
+            app.job.lock().unwrap().log.push(format!("paid the deposit from your payout address: {txid}"));
+            j(json!({ "txid": txid.to_string() }))
         }
         (Method::Post, "/api/claim-mint") => {
             let c: Cid = serde_json::from_value(body)?;

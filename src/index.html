@@ -97,7 +97,9 @@ button.copybtn { margin: 4px 0 0 8px; vertical-align: baseline; }
           <dt>address</dt><dd><span id="payaddr" class="mono copy"></span></dd>
         </dl>
       </div>
+      <button id="payfrombtn" class="act hidden">Pay it from your Bitcoin payout address</button>
       <button id="faucetbtn" class="act sec hidden">Pay it from the devstack's faucet</button>
+      <div id="payfrommsg" class="msg hidden"></div>
     </div>
     <div id="jobresult" class="msg hidden"></div>
     <div id="joblog" class="log"></div>
@@ -158,10 +160,11 @@ button.copybtn { margin: 4px 0 0 8px; vertical-align: baseline; }
           <label for="o-deposit">deposit (sats): what you put in, minted to you on the L2 less the fee</label>
           <input id="o-deposit" type="number" min="0" step="1000" value="100000">
           <label for="o-liq">inbound liquidity (sats): what you can receive beyond your balance</label>
-          <input id="o-liq" type="number" min="0" step="1000" value="200000">
+          <input id="o-liq" type="number" min="0" step="1000" value="100000">
           <label for="o-payout">your payout and refund address (on Bitcoin)</label>
           <input id="o-payout" class="mono" placeholder="tb1…" autocomplete="off" spellcheck="false">
-          <div class="note" id="o-payout-note">An address of your own Bitcoin wallet (Sparrow, Bitcoin Core, …): this GUI holds no coins on Bitcoin.</div>
+          <div class="note">By default this wallet's own Bitcoin address (see "Your Bitcoin" below): withdrawals, refunds and your reserve arrive there, and you can pay from it, the next deposit too. Or an address of another wallet of yours.</div>
+          <button id="o-payout-own" class="act small sec">Use this wallet's own address</button>
           <button id="o-payout-new" class="act sec hidden">A new address from the devstack's node</button>
           <details>
             <summary>advanced</summary>
@@ -179,6 +182,24 @@ button.copybtn { margin: 4px 0 0 8px; vertical-align: baseline; }
     <section id="contractscard" class="card hidden">
       <h2>Contracts</h2>
       <div id="contracts"></div>
+    </section>
+
+    <section id="payoutcard" class="card hidden">
+      <h2>Your Bitcoin</h2>
+      <p class="note">This wallet's own address on Bitcoin. Withdrawals, refunds and reserves paid to it arrive here, and you can pay on from it: to another wallet, or the next contract's deposit (the opening offers it). Its key is this wallet's, so back up the wallet file.</p>
+      <div class="pay">
+        <img id="poqr" alt="QR code of your Bitcoin payout address">
+        <dl class="kv">
+          <dt>address</dt><dd><span id="poaddr" class="mono copy"></span></dd>
+          <dt>balance</dt><dd id="pobal">—</dd>
+        </dl>
+      </div>
+      <label for="po-to">send to (a Bitcoin address)</label>
+      <input id="po-to" class="mono" autocomplete="off" spellcheck="false">
+      <label for="po-amt">amount (sats; empty: everything, less the fee)</label>
+      <input id="po-amt" type="number" min="330" step="1000" autocomplete="off">
+      <button id="posend" class="act">Send</button>
+      <div id="pomsg" class="msg hidden"></div>
     </section>
 
     <section id="depositscard" class="card hidden">
@@ -343,6 +364,23 @@ $('faucetbtn').onclick = async () => {
   const p = S?.job?.pay; if (!p) return;
   try { await api('POST', '/api/faucet', { address: p.address, sats: p.sats }); } catch (e) { alertMsg(e); }
 };
+$('o-payout-own').onclick = () => { if (S?.snap.payout_address) { $('o-payout').value = S.snap.payout_address; render(); } };
+// payments from the payout key: not operations (no wallet needed), so
+// their answer is shown where they're asked
+$('posend').onclick = async () => {
+  const b = $('posend'), amt = $('po-amt').value.trim();
+  b.disabled = true;
+  try { const r = await api('POST', '/api/send-payout', { to: $('po-to').value.trim(), amount: amt ? +amt : null }); msg('pomsg', `sent: ${r.txid}`, 'good'); $('po-to').value = ''; $('po-amt').value = ''; }
+  catch (e) { msg('pomsg', e.message, 'bad'); }
+  finally { b.disabled = false; refresh(); }
+};
+$('payfrombtn').onclick = async () => {
+  const b = $('payfrombtn');
+  b.disabled = true;
+  try { const r = await api('POST', '/api/pay-deposit', {}); msg('payfrommsg', `paid: ${r.txid}; waiting for it to confirm`, 'good'); show('payfrombtn', false); }
+  catch (e) { msg('payfrommsg', e.message, 'bad'); }
+  finally { b.disabled = false; refresh(); }
+};
 $('o-payout-new').onclick = async () => {
   try { $('o-payout').value = (await api('POST', '/api/faucet-address', {})).address; } catch (e) { alertMsg(e); }
 };
@@ -374,14 +412,26 @@ function render() {
   }
   // the devstack's faucet: regtest only, whatever a saved connection holds
   const faucet = !!conn.faucet && net === 'regtest';
-  show('o-payout-new', faucet); show('o-payout-note', !faucet);
+  show('o-payout-new', faucet);
+  // the payout address: this wallet's own unless another was given
+  show('o-payout-own', !!snap.payout_address && $('o-payout').value.trim() !== snap.payout_address);
+  if (snap.payout_address && !$('o-payout').value.trim() && document.activeElement !== $('o-payout')) $('o-payout').value = snap.payout_address;
+  show('payoutcard', !!s.wallet && !!snap.payout_address);
+  if (snap.payout_address) {
+    $('poaddr').textContent = snap.payout_address; copyable($('poaddr'), snap.payout_address);
+    qr($('poqr'), 'bitcoin:' + snap.payout_address);
+    $('pobal').textContent = snap.payout_balance != null ? `${sats(snap.payout_balance)} sats` : '—';
+  }
   // header
   $('net').textContent = conn.hub ? net : 'not connected';
   const up = s.wallet && !snap.hub_error;
   $('conn').textContent = !conn.hub ? '—' : snap.hub_error ? 'hub unreachable' : s.wallet ? 'connected' : s.pin ? 'keys to check' : 'not connected';
   $('conn').className = 'pill ' + (up ? 'ok' : conn.hub ? 'bad' : '');
-  // Bitcoin's height, then the L2's: sealed, and anchored on Bitcoin
-  const l2 = snap.sealed != null ? `L2 height ${sats(snap.sealed)}` + (snap.anchored != null ? `, anchored to ${sats(snap.anchored)}` : '') : '';
+  // Bitcoin's height, then the L2's: sealed, anchored on Bitcoin, and
+  // proved by the sequencer's chain prover (a withdrawal waits on both;
+  // none proved: no prover, as on the devstack)
+  const l2more = [snap.anchored != null ? `anchored to ${sats(snap.anchored)}` : '', snap.proved ? `proved to ${sats(snap.proved)}` : ''].filter(Boolean).join(', ');
+  const l2 = snap.sealed != null ? `L2 height ${sats(snap.sealed)}` + (l2more ? ` (${l2more})` : '') : '';
   $('height').textContent = [snap.height != null ? `block ${sats(snap.height)}` : '', l2].filter(Boolean).join(' · ');
   const bal = snap.transparent + snap.shielded;
   $('headbal').textContent = s.wallet ? `${sats(bal)} sats` : '—';
@@ -407,11 +457,15 @@ function render() {
   if (j.name) {
     $('jobname').innerHTML = (j.running ? '<span class="spin"></span>' : '') + esc(j.name);
     show('jobpay', j.running && !!j.pay);
+    if (!(j.running && j.pay)) msg('payfrommsg', '');
     if (j.pay) {
       $('payamt').textContent = `${sats(j.pay.sats)} sats (${(j.pay.sats / 1e8).toFixed(8)} BTC)`; copyable($('payamt'), (j.pay.sats / 1e8).toFixed(8));
       $('payaddr').textContent = j.pay.address; copyable($('payaddr'), j.pay.address);
       qr($('payqr'), 'bitcoin:' + j.pay.address + '?amount=' + (j.pay.sats / 1e8).toFixed(8));
       show('faucetbtn', !!conn.faucet && net === 'regtest');
+      // with a margin for the payment's fee
+      show('payfrombtn', snap.payout_balance != null && snap.payout_balance >= j.pay.sats + 1000);
+      $('payfrombtn').textContent = `Pay it from your Bitcoin payout address (${sats(snap.payout_balance ?? 0)} sats there)`;
     }
     if (j.error) msg('jobresult', j.error, 'bad'); else if (j.result) msg('jobresult', j.result, 'good'); else msg('jobresult', '');
     // once the job has ended its log is history: greyed, and its end
@@ -426,20 +480,26 @@ function render() {
   setHTML('contracts', snap.contracts.length ? `<table><tr><th>contract</th><th class="num">minted</th><th class="num">cap</th><th>ends</th><th>state</th><th></th></tr>` + snap.contracts.map(c => {
     const left = snap.height != null ? c.t_close - snap.height : null;
     const ends = `block ${sats(c.t_close)}` + (left != null ? (left > 0 ? `<div class="note">${sats(left)} blocks ${about(left, net) ? '· ' + about(left, net) : ''}</div>` : '<div class="note" style="color:var(--bad)">ended</div>') : '');
-    const state = c.closed ? `${c.disputing != null ? 'closed by a dispute' : 'closed'} <div class="note mono">${esc(c.closed.slice(0, 16))}…</div>` : c.disputing != null ? 'in dispute' : c.returned != null ? `${sats(c.returned)} sats returned, not folded` : !c.mint_claimed ? 'mint not claimed' : 'open';
+    const state = c.closed ? `${c.disputing != null ? 'closed by a dispute' : 'closed'} <div class="note mono">${esc(c.closed.slice(0, 16))}…</div>` : c.defaulted ? 'closed by its default (your reserve back)' : c.disputing != null ? 'in dispute' : c.returned != null ? `${sats(c.returned)} sats returned, not folded` : !c.mint_claimed ? 'mint not claimed' : 'open';
     let acts = '';
-    if (!c.closed) {
+    if (!c.closed && !c.defaulted && !(left != null && left <= 0)) {
       // the whole balance by default, up to the cap; a return made already
       // is the amount to fold
       const all = c.returned ?? Math.min(bal, c.cap);
       const what = c.returned != null ? 'the return made' : bal > c.cap ? `the cap; your balance is ${sats(bal)}` : 'your whole balance';
-      acts += `<div class="row"><input id="w-${c.cid}" type="number" min="1" placeholder="sats" autocomplete="off" value="${all || ''}"${c.returned != null ? ' readonly' : ''}><button class="act small" data-w="${c.cid}">Withdraw</button></div><div class="note">${all ? sats(all) + ' sats: ' + what : 'nothing to withdraw'}</div>`;
+      if (all > 0) acts += `<div class="row"><input id="w-${c.cid}" type="number" min="0" placeholder="sats" autocomplete="off" value="${all}"${c.returned != null ? ' readonly' : ''}><button class="act small" data-w="${c.cid}">Withdraw</button></div><div class="note">${sats(all)} sats: ${what}${c.returned != null ? '' : '; 0 closes it, your reserve back'}</div>`;
+      // nothing to withdraw: close it now, not at its end
+      else acts += `<button class="act small" data-close="${c.cid}">Close (your reserve back)</button><div class="note">nothing to withdraw: closes it now, rather than at its end</div>`;
     }
+    // ended, not closed: the hub posts the default; if it hasn't, this does
+    if (!c.closed && !c.defaulted && left != null && left <= 0) acts += `<button class="act small sec" data-d="${c.cid}">Post the default (your reserve back)</button><div class="note">the hub should post it; this does if it hasn't</div>`;
     if (!c.mint_claimed) acts += `<button class="act small sec" data-m="${c.cid}">Claim mint</button>`;
-    if (c.closed && c.disputing == null) acts += c.budget === 0 ? '<span class="note">fee budget swept</span>' : `<button class="act small sec" data-f="${c.cid}">Sweep fee budget${c.budget ? ` (${sats(c.budget)} sats)` : ''}</button>`;
+    if ((c.closed || c.defaulted) && c.disputing == null) acts += c.budget === 0 ? '<span class="note">fee budget swept</span>' : `<button class="act small sec" data-f="${c.cid}">Sweep fee budget${c.budget ? ` (${sats(c.budget)} sats)` : ''}</button>`;
     return `<tr><td>${c.cid}<div class="note">payout ${esc(c.payout.slice(0, 14))}…</div></td><td class="num">${sats(c.minted)}</td><td class="num">${sats(c.cap)}</td><td>${ends}</td><td>${state}</td><td>${acts}</td></tr>`;
   }).join('') + '</table><p class="note">Withdraw before a contract ends: an unwithdrawn contract is the hub\'s at its end. A withdrawal waits for its return to be anchored on Bitcoin.</p>' : '');
   document.querySelectorAll('[data-w]').forEach(b => b.onclick = () => act('/api/withdraw', { cid: +b.dataset.w, amount: +$('w-' + b.dataset.w).value }, b));
+  document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => act('/api/withdraw', { cid: +b.dataset.close, amount: 0 }, b));
+  document.querySelectorAll('[data-d]').forEach(b => b.onclick = () => act('/api/post-default', { cid: +b.dataset.d }, b));
   document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => act('/api/claim-mint', { cid: +b.dataset.m }, b));
   document.querySelectorAll('[data-f]').forEach(b => b.onclick = () => act('/api/sweep', { cid: +b.dataset.f }, b));
   // deposits

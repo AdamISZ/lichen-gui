@@ -42,6 +42,7 @@ says what to do (`LICHEN_GUI_DEV=1` builds against it anyway).
 |---|---|
 | v0.1.0 | v0.4.1 |
 | v0.1.1 | v0.4.2 |
+| v0.2.0 | v0.4.3 |
 
 A hub tells wallets which guests it proves with, and the GUI refuses one
 whose guests aren't its own build's: use the lichen version the hub runs
@@ -60,6 +61,14 @@ hub's operator publishes, then confirm. It makes a wallet pinned to that
 deployment. The chain is read from the network's public Esplora
 (mutinynet.com's, or mempool.space's for signet); under "chain source" you
 can name others, or a node.
+
+The wallet has a Bitcoin address of its own ("Your Bitcoin"), the default
+payout address of a contract: withdrawals, refunds and reserves arrive
+there, and you can send from it, or pay the next contract's deposit from
+it when an opening asks. So beyond a faucet for the first deposit, no
+other wallet is needed. A contract with nothing left to withdraw can be
+closed early (your reserve back), and one past its end whose default the
+hub hasn't posted, you can post yourself.
 
 Its data is in `~/Library/Application Support/lichen-gui` (Mac) or
 `~/.local/share/lichen-gui` (Linux), or `--dir`. There's one wallet file per

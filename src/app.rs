@@ -103,6 +103,9 @@ pub struct ContractView {
     /// A closed contract's fee budget left on chain (sats): 0 once swept;
     /// none if open, or not read.
     pub budget: Option<u64>,
+    /// Past `T_close`, its output spent with no close of the wallet's: the
+    /// hub's default (the user's reserve back).
+    pub defaulted: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -149,6 +152,13 @@ pub struct Snap {
     /// Bitcoin (an anchored deployment's).
     pub sealed: Option<u64>,
     pub anchored: Option<u64>,
+    /// The last L2 height the sequencer has proved (read apart from the
+    /// wallet, so it moves while an operation runs).
+    pub proved: Option<u64>,
+    /// The wallet's own Bitcoin payout address, and what's there (sats,
+    /// confirmed or not; read apart from the wallet too).
+    pub payout_address: String,
+    pub payout_balance: Option<u64>,
     /// Unix seconds of the wallet's last refresh.
     pub updated: u64,
 }
@@ -188,6 +198,10 @@ pub struct App {
     /// The wallet's closed contracts whose fee budget is spent: it never
     /// fills again, so it isn't read again.
     pub swept: Mutex<std::collections::HashSet<u32>>,
+    /// The wallet's payout key, kept apart from it: paying from it needs
+    /// no wallet (an opening holds the wallet while it waits for the
+    /// deposit this pays).
+    pub payout: Mutex<Option<bitcoin::key::Keypair>>,
 }
 
 pub fn now() -> u64 {
@@ -202,7 +216,7 @@ impl App {
             Err(_) => Saved::default(),
         };
         let history = std::fs::read(dir.join("activity.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Ok(Arc::new(App { dir, saved: Mutex::new(saved), wallet: Mutex::new(None), file: Mutex::new(None), pending: Mutex::new(None), snap: Mutex::new(Snap::default()), job: Mutex::new(Job::default()), history: Mutex::new(history), swept: Default::default() }))
+        Ok(Arc::new(App { dir, saved: Mutex::new(saved), wallet: Mutex::new(None), file: Mutex::new(None), pending: Mutex::new(None), snap: Mutex::new(Snap::default()), job: Mutex::new(Job::default()), history: Mutex::new(history), swept: Default::default(), payout: Mutex::new(None) }))
     }
 
     pub fn conn(&self) -> Conn {
@@ -232,6 +246,7 @@ impl App {
         *self.pending.lock().unwrap() = None;
         *self.snap.lock().unwrap() = Snap::default();
         self.swept.lock().unwrap().clear();
+        *self.payout.lock().unwrap() = None;
         {
             let mut s = self.saved.lock().unwrap();
             s.conn = conn.clone();
@@ -251,6 +266,7 @@ impl App {
         if path.exists() {
             let w = Wallet::open(&path, &conn.sequencer)?;
             ensure!(w.sequencer.deployment == info.deployment, "the wallet {} is pinned to another deployment", path.display());
+            self.keep_payout(&w, &conn);
             *self.wallet.lock().unwrap() = Some(w);
             *self.file.lock().unwrap() = Some(path);
             return Ok(None);
@@ -269,9 +285,32 @@ impl App {
             let _ = std::fs::remove_file(&path);
             bail!("the sequencer now announces another deployment than the one checked: connect again");
         }
+        self.keep_payout(&w, &conn);
         *self.wallet.lock().unwrap() = Some(w);
         *self.file.lock().unwrap() = Some(path);
         Ok(())
+    }
+
+    /// The wallet's payout key, kept; on a node, its script watched (a
+    /// node's index sees only what's paid after).
+    fn keep_payout(&self, w: &Wallet, conn: &Conn) {
+        let p = w.payout();
+        if let Ok(c) = conn.chain() {
+            let _ = c.watch(&p.spk());
+        }
+        *self.payout.lock().unwrap() = Some(p.keypair);
+    }
+    /// The payout key, as fees: its coins, and what pays from them.
+    pub fn payout_key(&self) -> Option<lichen_chain::KeyFees> {
+        self.payout.lock().unwrap().map(|keypair| lichen_chain::KeyFees { keypair, feerate: lichen_wallet::PAYOUT_FEERATE })
+    }
+    /// Pay from the payout key: `amount`, or everything (less the fee).
+    pub fn send_payout(&self, to: &str, amount: Option<u64>) -> Result<bitcoin::Txid> {
+        let conn = self.conn();
+        let key = self.payout_key().context("no wallet: connect first")?;
+        let to: bitcoin::Address<bitcoin::address::NetworkUnchecked> = to.trim().parse().context("the address to pay")?;
+        let to = to.require_network(conn.network.bitcoin()).with_context(|| format!("the address to pay isn't a {} address", conn.network))?.script_pubkey();
+        lichen_wallet::send_from(&key, &conn.chain()?, &to, amount.map(bitcoin::Amount::from_sat))
     }
 
     pub fn pending_pin(&self) -> Option<Pin> {
@@ -310,6 +349,13 @@ impl App {
             Ok(h) => (Some(h), None),
             Err(e) => (None, Some(format!("{e:#}"))),
         };
+        // apart from the wallet: the proved height, and the payout key's
+        // coins (an operation may hold the wallet)
+        let proved = ureq::get(&format!("{}/chain", conn.sequencer)).call().ok().and_then(|r| r.into_json::<lichen_l2::Proved>().ok()).map(|p| p.proved);
+        let payout = self.payout_key().map(|k| {
+            let address = bitcoin::Address::from_script(&k.spk(), conn.network.bitcoin()).map_or_else(|_| String::new(), |a| a.to_string());
+            (address, chain.as_ref().ok().and_then(|c| k.balance(c).ok()).map(|a| a.to_sat()))
+        });
         let wallet = match self.wallet.try_lock() {
             Ok(g) => g.as_ref().map(|w| self.read_wallet(w, conn.network, chain.as_ref().ok())),
             Err(_) => None,
@@ -329,10 +375,18 @@ impl App {
             Some(Err(e)) => s.wallet_error = Some(format!("{e:#}")),
             None => {}
         }
+        s.proved = proved;
+        if let Some((address, balance)) = payout {
+            s.payout_address = address;
+            s.payout_balance = balance.or(s.payout_balance);
+        }
     }
 
     fn read_wallet(&self, w: &Wallet, net: Net, chain: Option<&Chain>) -> Result<Snap> {
         let state = w.state()?;
+        let height = chain.and_then(|c| c.height().ok());
+        // past T_close with no close of ours: spent means the hub's default
+        let defaulted = |h: &lichen_wallet::Held| h.closed.is_none() && height.is_some_and(|t| t >= h.record.terms.t_close) && chain.is_some_and(|c| c.unspent(&h.record.funding).ok() == Some(false));
         let me = w.address();
         let notes = state.transparent().filter(|(_, n)| n.owner == me).map(|(i, n)| NoteView { index: i, value: n.value, memo: n.memo, spent: state.is_spent(n) }).collect();
         let (transparent, shielded) = w.balances()?;
@@ -342,6 +396,7 @@ impl App {
             .iter()
             .map(|h| {
                 let t = &h.record.terms;
+                let defaulted = defaulted(h);
                 ContractView {
                     cid: h.record.cid(),
                     deposit: u64::from(t.deposit),
@@ -354,7 +409,8 @@ impl App {
                     mint_claimed: h.mint.as_ref().is_none_or(|m| m.claimed),
                     returned: h.closed.is_none().then(|| w.returned(h.record.cid())).flatten().and_then(|i| state.note(i)).map(|n| n.value),
                     disputing: h.claim.as_ref().map(|c| c.0),
-                    budget: h.closed.and_then(|_| self.budget(w, h, net, chain)),
+                    budget: (h.closed.is_some() || defaulted).then(|| self.budget(w, h, net, chain)).flatten(),
+                    defaulted,
                 }
             })
             .collect();
