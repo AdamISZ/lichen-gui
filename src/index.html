@@ -61,6 +61,7 @@ td.num, th.num { text-align: right; }
 .pay img { width: 180px; height: 180px; background: #fff; border-radius: 6px; }
 .big { font-size: 34px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 .log { font-family: var(--mono); font-size: 12px; color: var(--muted); max-height: 160px; overflow: auto; white-space: pre-wrap; margin-top: 8px; }
+.log.ended { opacity: .6; }
 .spin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%; animation: s 1s linear infinite; margin-right: 6px; }
 @keyframes s { to { transform: rotate(360deg); } }
 .hidden { display: none !important; }
@@ -235,7 +236,7 @@ const $ = id => document.getElementById(id);
 const sats = n => (n ?? 0).toLocaleString('en-US');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const BLOCK_SECS = { mutinynet: 30, signet: 600, testnet4: 600, regtest: 0 };
-let S = null, filled = false;
+let S = null, filled = false, walletErr = null;
 
 async function api(method, path, body) {
   const r = await fetch(path, { method, headers: { 'X-Lichen-Token': token, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -379,7 +380,9 @@ function render() {
   const up = s.wallet && !snap.hub_error;
   $('conn').textContent = !conn.hub ? '—' : snap.hub_error ? 'hub unreachable' : s.wallet ? 'connected' : s.pin ? 'keys to check' : 'not connected';
   $('conn').className = 'pill ' + (up ? 'ok' : conn.hub ? 'bad' : '');
-  $('height').textContent = snap.height != null ? `block ${sats(snap.height)}` : '';
+  // Bitcoin's height, then the L2's: sealed, and anchored on Bitcoin
+  const l2 = snap.sealed != null ? `L2 height ${sats(snap.sealed)}` + (snap.anchored != null ? `, anchored to ${sats(snap.anchored)}` : '') : '';
+  $('height').textContent = [snap.height != null ? `block ${sats(snap.height)}` : '', l2].filter(Boolean).join(' · ');
   const bal = snap.transparent + snap.shielded;
   $('headbal').textContent = s.wallet ? `${sats(bal)} sats` : '—';
   // terms
@@ -411,7 +414,12 @@ function render() {
       show('faucetbtn', !!conn.faucet && net === 'regtest');
     }
     if (j.error) msg('jobresult', j.error, 'bad'); else if (j.result) msg('jobresult', j.result, 'good'); else msg('jobresult', '');
-    $('joblog').textContent = j.log.slice(-12).join('\n');
+    // once the job has ended its log is history: greyed, and its end
+    // said, so a last "waiting for …" doesn't read as still going
+    const log = j.log.slice(-12).join('\n') + (!j.running && j.ended ? `\n— ended ${new Date(j.ended * 1000).toLocaleTimeString()}` : '');
+    // kept at its latest line as it grows (it scrolls past 160 px)
+    if ($('joblog').textContent !== log) { $('joblog').textContent = log; $('joblog').scrollTop = $('joblog').scrollHeight; }
+    $('joblog').classList.toggle('ended', !j.running);
   }
   // contracts
   show('contractscard', snap.contracts.length > 0);
@@ -428,7 +436,7 @@ function render() {
       acts += `<div class="row"><input id="w-${c.cid}" type="number" min="1" placeholder="sats" autocomplete="off" value="${all || ''}"${c.returned != null ? ' readonly' : ''}><button class="act small" data-w="${c.cid}">Withdraw</button></div><div class="note">${all ? sats(all) + ' sats: ' + what : 'nothing to withdraw'}</div>`;
     }
     if (!c.mint_claimed) acts += `<button class="act small sec" data-m="${c.cid}">Claim mint</button>`;
-    if (c.closed && c.disputing == null) acts += `<button class="act small sec" data-f="${c.cid}">Sweep fee budget</button>`;
+    if (c.closed && c.disputing == null) acts += c.budget === 0 ? '<span class="note">fee budget swept</span>' : `<button class="act small sec" data-f="${c.cid}">Sweep fee budget${c.budget ? ` (${sats(c.budget)} sats)` : ''}</button>`;
     return `<tr><td>${c.cid}<div class="note">payout ${esc(c.payout.slice(0, 14))}…</div></td><td class="num">${sats(c.minted)}</td><td class="num">${sats(c.cap)}</td><td>${ends}</td><td>${state}</td><td>${acts}</td></tr>`;
   }).join('') + '</table><p class="note">Withdraw before a contract ends: an unwithdrawn contract is the hub\'s at its end. A withdrawal waits for its return to be anchored on Bitcoin.</p>' : '');
   document.querySelectorAll('[data-w]').forEach(b => b.onclick = () => act('/api/withdraw', { cid: +b.dataset.w, amount: +$('w-' + b.dataset.w).value }, b));
@@ -464,7 +472,11 @@ function render() {
   const notes = [...snap.notes].sort((a, b) => b.index - a.index);
   setHTML('notes', notes.length ? `<table><tr><th>note</th><th class="num">sats</th><th>memo</th><th></th></tr>` + notes.slice(0, 40).map(n => `<tr><td>#${n.index}</td><td class="num">${sats(n.value)}</td><td>${n.memo || ''}</td><td>${n.spent ? '<span class="note">spent</span>' : 'yours'}</td></tr>`).join('') + '</table>' : 'none yet');
   setHTML('history', s.history.length ? s.history.slice(0, 25).map(h => `<div style="margin-bottom:8px"><div>${esc(h.name)} <span class="note">${new Date(h.ended * 1000).toLocaleString()}</span></div><div class="${h.error ? '' : 'note'}" style="${h.error ? 'color:var(--bad)' : ''}">${esc((h.error || h.result || '').split('\n')[0])}</div></div>`).join('') : 'nothing yet');
-  if (snap.wallet_error) msg('connmsg', snap.wallet_error, 'bad');
+  // the wallet's error (the sequencer unreachable, say) shown while it
+  // lasts: cleared once a refresh has none, unless another message
+  // replaced it
+  if (snap.wallet_error) { msg('connmsg', snap.wallet_error, 'bad'); walletErr = snap.wallet_error; }
+  else if (walletErr != null) { if ($('connmsg').textContent === walletErr) msg('connmsg', ''); walletErr = null; }
 }
 
 async function refresh() {

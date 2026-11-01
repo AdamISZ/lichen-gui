@@ -21,19 +21,27 @@ isn't part of lichen.
 
 ## Build
 
-It builds against lichen's crates by path, so check out
-[lichen](https://github.com/AdamISZ/lichen) and
-[ln-gap](https://github.com/AdamISZ/ln-gap) beside this directory
-(`../lichen`, `../ln-gap`): lichen at the tag this release names, ln-gap
-at the commit in lichen's `LNGAP_REV`. Then:
+You need git and Rust ([rustup](https://rustup.rs); `rust-toolchain.toml`
+picks the version). Then:
 
 ```sh
-cargo build --release      # target/release/lichen-gui and lichen-devstack
+git clone https://github.com/AdamISZ/lichen-gui
+cd lichen-gui
+./build.sh                 # target/release/lichen-gui and lichen-devstack
 ```
+
+It builds against lichen's crates by path, so `build.sh` clones
+[lichen](https://github.com/AdamISZ/lichen) beside this directory
+(`../lichen`) at the tag in `LICHEN_TAG`, and
+[ln-gap](https://github.com/AdamISZ/ln-gap) (`../ln-gap`) at the commit
+in lichen's `LNGAP_REV`. A checkout already there is left as it is: at
+another revision, or with changes to its files, the script stops and
+says what to do (`LICHEN_GUI_DEV=1` builds against it anyway).
 
 | lichen-gui | lichen |
 |---|---|
 | v0.1.0 | v0.4.1 |
+| v0.1.1 | v0.4.2 |
 
 A hub tells wallets which guests it proves with, and the GUI refuses one
 whose guests aren't its own build's: use the lichen version the hub runs

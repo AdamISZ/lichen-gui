@@ -100,6 +100,9 @@ pub struct ContractView {
     pub returned: Option<u64>,
     /// A dispute in progress: its `b`, in units.
     pub disputing: Option<u32>,
+    /// A closed contract's fee budget left on chain (sats): 0 once swept;
+    /// none if open, or not read.
+    pub budget: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -142,6 +145,10 @@ pub struct Snap {
     pub notes: Vec<NoteView>,
     pub contracts: Vec<ContractView>,
     pub deposits: Vec<DepositView>,
+    /// The L2's last sealed height, and the last height anchored on
+    /// Bitcoin (an anchored deployment's).
+    pub sealed: Option<u64>,
+    pub anchored: Option<u64>,
     /// Unix seconds of the wallet's last refresh.
     pub updated: u64,
 }
@@ -178,6 +185,9 @@ pub struct App {
     pub snap: Mutex<Snap>,
     pub job: Mutex<Job>,
     pub history: Mutex<Vec<Job>>,
+    /// The wallet's closed contracts whose fee budget is spent: it never
+    /// fills again, so it isn't read again.
+    pub swept: Mutex<std::collections::HashSet<u32>>,
 }
 
 pub fn now() -> u64 {
@@ -192,7 +202,7 @@ impl App {
             Err(_) => Saved::default(),
         };
         let history = std::fs::read(dir.join("activity.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Ok(Arc::new(App { dir, saved: Mutex::new(saved), wallet: Mutex::new(None), file: Mutex::new(None), pending: Mutex::new(None), snap: Mutex::new(Snap::default()), job: Mutex::new(Job::default()), history: Mutex::new(history) }))
+        Ok(Arc::new(App { dir, saved: Mutex::new(saved), wallet: Mutex::new(None), file: Mutex::new(None), pending: Mutex::new(None), snap: Mutex::new(Snap::default()), job: Mutex::new(Job::default()), history: Mutex::new(history), swept: Default::default() }))
     }
 
     pub fn conn(&self) -> Conn {
@@ -221,6 +231,7 @@ impl App {
         *self.file.lock().unwrap() = None;
         *self.pending.lock().unwrap() = None;
         *self.snap.lock().unwrap() = Snap::default();
+        self.swept.lock().unwrap().clear();
         {
             let mut s = self.saved.lock().unwrap();
             s.conn = conn.clone();
@@ -294,12 +305,13 @@ impl App {
             }
             Err(e) => (None, Some(format!("{e:#}"))),
         };
-        let (height, chain_error) = match conn.chain().and_then(|c| c.height()) {
+        let chain = conn.chain();
+        let (height, chain_error) = match chain.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|c| c.height()) {
             Ok(h) => (Some(h), None),
             Err(e) => (None, Some(format!("{e:#}"))),
         };
         let wallet = match self.wallet.try_lock() {
-            Ok(g) => g.as_ref().map(|w| self.read_wallet(w, conn.network)),
+            Ok(g) => g.as_ref().map(|w| self.read_wallet(w, conn.network, chain.as_ref().ok())),
             Err(_) => None,
         };
         let mut s = self.snap.lock().unwrap();
@@ -319,7 +331,7 @@ impl App {
         }
     }
 
-    fn read_wallet(&self, w: &Wallet, net: Net) -> Result<Snap> {
+    fn read_wallet(&self, w: &Wallet, net: Net, chain: Option<&Chain>) -> Result<Snap> {
         let state = w.state()?;
         let me = w.address();
         let notes = state.transparent().filter(|(_, n)| n.owner == me).map(|(i, n)| NoteView { index: i, value: n.value, memo: n.memo, spent: state.is_spent(n) }).collect();
@@ -342,6 +354,7 @@ impl App {
                     mint_claimed: h.mint.as_ref().is_none_or(|m| m.claimed),
                     returned: h.closed.is_none().then(|| w.returned(h.record.cid())).flatten().and_then(|i| state.note(i)).map(|n| n.value),
                     disputing: h.claim.as_ref().map(|c| c.0),
+                    budget: h.closed.and_then(|_| self.budget(w, h, net, chain)),
                 }
             })
             .collect();
@@ -352,7 +365,22 @@ impl App {
             let address = addr(&tree.script_pubkey());
             deposits.push(DepositView { cid: d.cid, ask: asks.get(&address).copied(), address, payout: addr(&d.payout), timeout: d.timeout, offered: d.offered.is_some() });
         }
-        Ok(Snap { address: hex::encode(me), transparent, shielded, notes, contracts, deposits, updated: now(), ..Snap::default() })
+        let sealed = state.sealed.last().map(|r| r.height);
+        let anchored = state.anchors.last().map(|a| a.anchor.height).filter(|&h| h > 0);
+        Ok(Snap { address: hex::encode(me), transparent, shielded, notes, contracts, deposits, sealed, anchored, updated: now(), ..Snap::default() })
+    }
+
+    /// A closed contract's fee budget left on chain, remembered once spent.
+    fn budget(&self, w: &Wallet, h: &lichen_wallet::Held, net: Net, chain: Option<&Chain>) -> Option<u64> {
+        let cid = h.record.cid();
+        if self.swept.lock().unwrap().contains(&cid) {
+            return Some(0);
+        }
+        let left = w.fees(&h.nonce, net).balance(chain?).ok()?.to_sat();
+        if left == 0 {
+            self.swept.lock().unwrap().insert(cid);
+        }
+        Some(left)
     }
 
     /// Run `f` with the wallet on a thread of its own: one operation at a
