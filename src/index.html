@@ -319,8 +319,15 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   show('tab-pay', b.dataset.tab === 'pay');
 });
 
+// the connection the form names
+function connForm() { return { network: $('c-network').value, hub: $('c-hub').value.trim(), sequencer: $('c-sequencer').value.trim(), esplora: $('c-esplora').value.trim(), rpc_url: $('c-rpc').value.trim(), cookie: $('c-cookie').value.trim(), faucet: $('c-faucet').value.trim() }; }
+// the Connect button follows the form as it's edited
+['c-network', 'c-hub', 'c-sequencer', 'c-esplora', 'c-rpc', 'c-cookie', 'c-faucet'].forEach(id => $(id).addEventListener('input', () => { if (S) render(); }));
+// a refresh is due every few seconds: none for this long, and the page
+// says it isn't updating
+const STALE_SECS = 30;
 $('connect').onclick = async () => {
-  const conn = { network: $('c-network').value, hub: $('c-hub').value.trim(), sequencer: $('c-sequencer').value.trim(), esplora: $('c-esplora').value.trim(), rpc_url: $('c-rpc').value.trim(), cookie: $('c-cookie').value.trim(), faucet: $('c-faucet').value.trim() };
+  const conn = connForm();
   msg('connmsg', 'connecting …');
   try {
     const r = await api('POST', '/api/connect', conn);
@@ -409,6 +416,9 @@ function render() {
     $('c-network').value = net; $('c-hub').value = conn.hub; $('c-sequencer').value = conn.sequencer; $('c-esplora').value = conn.esplora;
     $('c-rpc').value = conn.rpc_url; $('c-cookie').value = conn.cookie; $('c-faucet').value = conn.faucet; $('o-payout').value = s.saved.payout;
     if (s.wallet) quote();
+    // the GUI reconnects to the last hub when it starts: said, so a
+    // "connected" before any Connect is explained
+    if (s.launch) msg('connmsg', s.launch.text, s.launch.ok ? 'good' : 'bad');
   }
   // the devstack's faucet: regtest only, whatever a saved connection holds
   const faucet = !!conn.faucet && net === 'regtest';
@@ -424,9 +434,17 @@ function render() {
   }
   // header
   $('net').textContent = conn.hub ? net : 'not connected';
-  const up = s.wallet && !snap.hub_error;
-  $('conn').textContent = !conn.hub ? '—' : snap.hub_error ? 'hub unreachable' : s.wallet ? 'connected' : s.pin ? 'keys to check' : 'not connected';
+  const stale = !!s.wallet && snap.refreshed > 0 && Date.now() / 1000 - snap.refreshed > STALE_SECS;
+  const up = s.wallet && !snap.hub_error && !stale;
+  $('conn').textContent = !conn.hub ? '—' : snap.hub_error ? 'hub unreachable' : s.wallet ? (stale ? 'not updating' : 'connected') : s.pin ? 'keys to check' : 'not connected';
   $('conn').className = 'pill ' + (up ? 'ok' : conn.hub ? 'bad' : '');
+  $('conn').title = stale ? `no refresh since ${new Date(snap.refreshed * 1000).toLocaleTimeString()}: restart lichen-gui if it stays` : '';
+  // Connect: done while connected to what the form names; again once
+  // it's edited, or the connection is down; not while an operation runs
+  const form = connForm();
+  const same = Object.keys(form).every(k => form[k] === (conn[k] ?? ''));
+  $('connect').disabled = s.job.running || (up && same);
+  $('connect').textContent = up && same ? 'Connected' : conn.hub && same ? 'Reconnect' : 'Connect';
   // Bitcoin's height, then the L2's: sealed, anchored on Bitcoin, and
   // proved by the sequencer's chain prover (a withdrawal waits on both;
   // none proved: no prover, as on the devstack)

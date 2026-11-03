@@ -1761,7 +1761,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "lichen-babe"
-version = "0.4.3"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "ark-bn254",
@@ -1789,7 +1789,7 @@ dependencies = [
 
 [[package]]
 name = "lichen-chain"
-version = "0.4.3"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "bitcoin",
@@ -1809,7 +1809,7 @@ dependencies = [
 
 [[package]]
 name = "lichen-gui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "bitcoin",
@@ -1835,7 +1835,7 @@ dependencies = [
 
 [[package]]
 name = "lichen-hub"
-version = "0.4.3"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "bitcoin",
@@ -1863,7 +1863,7 @@ dependencies = [
 
 [[package]]
 name = "lichen-l2"
-version = "0.4.3"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "hex",
@@ -1875,7 +1875,7 @@ dependencies = [
 
 [[package]]
 name = "lichen-ledger"
-version = "0.4.3"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1893,7 +1893,7 @@ dependencies = [
 
 [[package]]
 name = "lichen-proto"
-version = "0.4.3"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "ark-bn254",
@@ -1917,7 +1917,7 @@ dependencies = [
 
 [[package]]
 name = "lichen-sequencer"
-version = "0.4.3"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "bitcoin",
@@ -1949,7 +1949,7 @@ dependencies = [
 
 [[package]]
 name = "lichen-wallet"
-version = "0.4.3"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "ark-bn254",

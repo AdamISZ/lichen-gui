@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{bail, ensure, Context, Result};
-use app::{App, AskView, Conn};
+use app::{App, AskView, Conn, Launch};
 use clap::Parser;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -65,12 +65,17 @@ fn main() -> Result<()> {
         app.saved.lock().unwrap().conn = conn;
         app.save()?;
     }
-    // reconnect to the last hub, if it answers
+    // reconnect to the last hub, if it answers; the page says so
     let conn = app.conn();
     if !conn.hub.is_empty() {
-        if let Err(e) = app.connect(conn) {
-            eprintln!("not connected: {e:#}");
-        }
+        let launch = match app.connect(conn.clone()) {
+            Ok(_) => Launch { ok: true, text: format!("Connected at launch to the hub at {}: lichen-gui reconnects to the last one when it starts.", conn.hub) },
+            Err(e) => {
+                eprintln!("not connected: {e:#}");
+                Launch { ok: false, text: format!("Not connected at launch to the hub at {}: {e:#}", conn.hub) }
+            }
+        };
+        *app.launch.lock().unwrap() = Some(launch);
     }
     app::refresher(app.clone());
     let mut t = [0u8; 16];
@@ -82,12 +87,36 @@ fn main() -> Result<()> {
         let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
         let _ = std::process::Command::new(opener).arg(&url).spawn();
     }
-    for req in server.incoming_requests() {
-        let app = app.clone();
-        let token = token.clone();
-        std::thread::spawn(move || serve(&app, &token, req));
+    // tiny_http 0.12 ends its listener for good at an error accepting a
+    // connection (a reset before accept, too many open files): listen
+    // again on the same address, as lichen's sequencer and hub do
+    let mut server = server;
+    loop {
+        match server.recv() {
+            Ok(req) => {
+                let app = app.clone();
+                let token = token.clone();
+                std::thread::spawn(move || serve(&app, &token, req));
+            }
+            Err(e) => {
+                eprintln!("lichen-gui: the listener stopped ({e}): listening again on {}", args.listen);
+                let mut said = false;
+                server = loop {
+                    match Server::http(&args.listen) {
+                        Ok(s) => break s,
+                        Err(e) => {
+                            if !said {
+                                eprintln!("lichen-gui: listening on {}: {e} (trying each second)", args.listen);
+                                said = true;
+                            }
+                            std::thread::sleep(std::time::Duration::from_secs(1));
+                        }
+                    }
+                };
+                eprintln!("lichen-gui: listening again on {}", args.listen);
+            }
+        }
     }
-    Ok(())
 }
 
 fn serve(app: &Arc<App>, token: &str, mut req: Request) {
@@ -148,10 +177,12 @@ fn route(app: &Arc<App>, method: &Method, path: &str, query: &str, body: &str) -
             let job = app.job.lock().unwrap().clone();
             let history = app.history.lock().unwrap().clone();
             let wallet = app.file.lock().unwrap().as_ref().map(|p| p.display().to_string());
-            j(json!({ "saved": saved, "snap": snap, "job": job, "history": history, "pin": app.pending_pin(), "wallet": wallet, "dir": app.dir }))
+            let launch = app.launch.lock().unwrap().clone();
+            j(json!({ "saved": saved, "snap": snap, "job": job, "history": history, "pin": app.pending_pin(), "wallet": wallet, "dir": app.dir, "launch": launch }))
         }
         (Method::Post, "/api/connect") => {
             let conn: Conn = serde_json::from_value(body)?;
+            *app.launch.lock().unwrap() = None;
             let pin = app.connect(conn)?;
             app.refresh();
             j(json!({ "pin": pin }))

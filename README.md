@@ -43,6 +43,7 @@ says what to do (`LICHEN_GUI_DEV=1` builds against it anyway).
 | v0.1.0 | v0.4.1 |
 | v0.1.1 | v0.4.2 |
 | v0.2.0 | v0.4.3 |
+| v0.2.1 | v0.4.5 |
 
 A hub tells wallets which guests it proves with, and the GUI refuses one
 whose guests aren't its own build's: use the lichen version the hub runs
@@ -61,6 +62,10 @@ hub's operator publishes, then confirm. It makes a wallet pinned to that
 deployment. The chain is read from the network's public Esplora
 (mutinynet.com's, or mempool.space's for signet); under "chain source" you
 can name others, or a node.
+
+At launch the GUI reconnects to the last hub, and says so under the
+connection. The header shows "not updating" if refreshes stop; restart the
+GUI if it stays.
 
 The wallet has a Bitcoin address of its own ("Your Bitcoin"), the default
 payout address of a contract: withdrawals, refunds and reserves arrive

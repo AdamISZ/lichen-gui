@@ -161,6 +161,16 @@ pub struct Snap {
     pub payout_balance: Option<u64>,
     /// Unix seconds of the wallet's last refresh.
     pub updated: u64,
+    /// Unix seconds of the last refresh's end, the wallet read or not: the
+    /// page says when refreshes stop.
+    pub refreshed: u64,
+}
+
+/// What became of the reconnection to the last hub at launch.
+#[derive(Clone, Debug, Serialize)]
+pub struct Launch {
+    pub ok: bool,
+    pub text: String,
 }
 
 /// The payment an opening waits for.
@@ -202,6 +212,11 @@ pub struct App {
     /// no wallet (an opening holds the wallet while it waits for the
     /// deposit this pays).
     pub payout: Mutex<Option<bitcoin::key::Keypair>>,
+    /// The wallet's sequencer client (pinned to its deployment), kept apart
+    /// from it: a refresh fetches the state before taking the wallet.
+    pub seq: Mutex<Option<lichen_l2::Client>>,
+    /// The reconnection at launch, until the user connects.
+    pub launch: Mutex<Option<Launch>>,
 }
 
 pub fn now() -> u64 {
@@ -216,7 +231,7 @@ impl App {
             Err(_) => Saved::default(),
         };
         let history = std::fs::read(dir.join("activity.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Ok(Arc::new(App { dir, saved: Mutex::new(saved), wallet: Mutex::new(None), file: Mutex::new(None), pending: Mutex::new(None), snap: Mutex::new(Snap::default()), job: Mutex::new(Job::default()), history: Mutex::new(history), swept: Default::default(), payout: Mutex::new(None) }))
+        Ok(Arc::new(App { dir, saved: Mutex::new(saved), wallet: Mutex::new(None), file: Mutex::new(None), pending: Mutex::new(None), snap: Mutex::new(Snap::default()), job: Mutex::new(Job::default()), history: Mutex::new(history), swept: Default::default(), payout: Mutex::new(None), seq: Mutex::new(None), launch: Mutex::new(None) }))
     }
 
     pub fn conn(&self) -> Conn {
@@ -247,6 +262,7 @@ impl App {
         *self.snap.lock().unwrap() = Snap::default();
         self.swept.lock().unwrap().clear();
         *self.payout.lock().unwrap() = None;
+        *self.seq.lock().unwrap() = None;
         {
             let mut s = self.saved.lock().unwrap();
             s.conn = conn.clone();
@@ -267,6 +283,7 @@ impl App {
             let w = Wallet::open(&path, &conn.sequencer)?;
             ensure!(w.sequencer.deployment == info.deployment, "the wallet {} is pinned to another deployment", path.display());
             self.keep_payout(&w, &conn);
+            *self.seq.lock().unwrap() = Some(w.sequencer.clone());
             *self.wallet.lock().unwrap() = Some(w);
             *self.file.lock().unwrap() = Some(path);
             return Ok(None);
@@ -286,6 +303,7 @@ impl App {
             bail!("the sequencer now announces another deployment than the one checked: connect again");
         }
         self.keep_payout(&w, &conn);
+        *self.seq.lock().unwrap() = Some(w.sequencer.clone());
         *self.wallet.lock().unwrap() = Some(w);
         *self.file.lock().unwrap() = Some(path);
         Ok(())
@@ -349,16 +367,20 @@ impl App {
             Ok(h) => (Some(h), None),
             Err(e) => (None, Some(format!("{e:#}"))),
         };
-        // apart from the wallet: the proved height, and the payout key's
-        // coins (an operation may hold the wallet)
-        let proved = ureq::get(&format!("{}/chain", conn.sequencer)).call().ok().and_then(|r| r.into_json::<lichen_l2::Proved>().ok()).map(|p| p.proved);
+        // apart from the wallet: the proved height, the payout key's coins
+        // (an operation may hold the wallet), and the sequencer's state,
+        // fetched before the wallet is taken: a slow read then holds up
+        // nothing queued for the wallet
+        let seq = self.seq.lock().unwrap().clone();
+        let proved = seq.as_ref().and_then(|c| c.proved_height().ok().flatten());
+        let state = seq.as_ref().map(|c| c.state());
         let payout = self.payout_key().map(|k| {
             let address = bitcoin::Address::from_script(&k.spk(), conn.network.bitcoin()).map_or_else(|_| String::new(), |a| a.to_string());
             (address, chain.as_ref().ok().and_then(|c| k.balance(c).ok()).map(|a| a.to_sat()))
         });
-        let wallet = match self.wallet.try_lock() {
-            Ok(g) => g.as_ref().map(|w| self.read_wallet(w, conn.network, chain.as_ref().ok())),
-            Err(_) => None,
+        let wallet = match (self.wallet.try_lock(), state) {
+            (Ok(g), Some(state)) => g.as_ref().map(|w| state.and_then(|state| self.read_wallet(w, state, conn.network, chain.as_ref().ok()))),
+            _ => None,
         };
         let mut s = self.snap.lock().unwrap();
         if info.is_some() {
@@ -380,16 +402,17 @@ impl App {
             s.payout_address = address;
             s.payout_balance = balance.or(s.payout_balance);
         }
+        s.refreshed = now();
     }
 
-    fn read_wallet(&self, w: &Wallet, net: Net, chain: Option<&Chain>) -> Result<Snap> {
-        let state = w.state()?;
+    fn read_wallet(&self, w: &Wallet, state: lichen_l2::State, net: Net, chain: Option<&Chain>) -> Result<Snap> {
+        let state = w.observe(state)?;
         let height = chain.and_then(|c| c.height().ok());
         // past T_close with no close of ours: spent means the hub's default
         let defaulted = |h: &lichen_wallet::Held| h.closed.is_none() && height.is_some_and(|t| t >= h.record.terms.t_close) && chain.is_some_and(|c| c.unspent(&h.record.funding).ok() == Some(false));
         let me = w.address();
         let notes = state.transparent().filter(|(_, n)| n.owner == me).map(|(i, n)| NoteView { index: i, value: n.value, memo: n.memo, spent: state.is_spent(n) }).collect();
-        let (transparent, shielded) = w.balances()?;
+        let (transparent, shielded) = w.balances_in(&state);
         let addr = |spk: &bitcoin::Script| bitcoin::Address::from_script(spk, net.bitcoin()).map_or_else(|_| spk.to_hex_string(), |a| a.to_string());
         let contracts = w
             .contracts
