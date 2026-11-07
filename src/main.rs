@@ -44,6 +44,7 @@ fn default_dir() -> Result<PathBuf> {
 }
 
 fn main() -> Result<()> {
+    app::tune_malloc();
     let args = Args::parse();
     let host = args.listen.split(':').next().unwrap_or_default();
     ensure!(host == "127.0.0.1" || host == "localhost", "the GUI listens on this machine only (127.0.0.1), not {host}");

@@ -44,6 +44,7 @@ says what to do (`LICHEN_GUI_DEV=1` builds against it anyway).
 | v0.1.1 | v0.4.2 |
 | v0.2.0 | v0.4.3 |
 | v0.2.1 | v0.4.5 |
+| v0.2.2 | v0.4.5 |
 
 A hub tells wallets which guests it proves with, and the GUI refuses one
 whose guests aren't its own build's: use the lichen version the hub runs

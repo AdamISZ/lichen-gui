@@ -559,6 +559,29 @@ pub fn payout_spk(payout: &str, net: Net) -> Result<bitcoin::ScriptBuf> {
     Ok(a.require_network(net.bitcoin()).with_context(|| format!("the payout address isn't a {net} address"))?.script_pubkey())
 }
 
+/// Have glibc's malloc give large blocks back to the system when they're
+/// freed. By default it raises its mmap threshold as large blocks are
+/// freed (up to 32 MB), and then serves them from each thread's arena,
+/// keeping them: after an opening's check of the hub's instances (rebuilt
+/// on every core, ~60 MB each at once) the GUI held its peak, about a GB
+/// on 16 cores, for as long as it ran, and `malloc_trim` gave back only a
+/// quarter of it (an arena's free top stays). A fixed 1 MB threshold: the
+/// GUI stays near 40 MB through the check. Called first thing in `main`.
+/// macOS returns large blocks by itself; musl has no `mallopt`.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+pub fn tune_malloc() {
+    const M_MMAP_THRESHOLD: std::ffi::c_int = -3;
+    extern "C" {
+        fn mallopt(param: std::ffi::c_int, value: std::ffi::c_int) -> std::ffi::c_int;
+    }
+    // SAFETY: glibc's mallopt takes no pointers; called before any thread
+    unsafe {
+        mallopt(M_MMAP_THRESHOLD, 1 << 20);
+    }
+}
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+pub fn tune_malloc() {}
+
 /// Refresh every few seconds, for the life of the GUI.
 pub fn refresher(app: Arc<App>) {
     std::thread::spawn(move || loop {
